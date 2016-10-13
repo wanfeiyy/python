@@ -2,6 +2,7 @@ import aiomysql
 import asyncio
 import sys
 import logging
+import importlib
 @asyncio.coroutine
 def create_pool(loop, **kw):
     #logging.info('create database connection pool...')
@@ -113,22 +114,25 @@ class ModelMetaclass(type):
             for x in fillable:
                  if x in fields:
                      hanleFillable.append(x)
-        escaped_fields = list(map(lambda f:'%s' %f, hanleFillable))
-        print(escaped_fields)
+        escaped_fields = list(map(lambda f:'%s' %f, hanleFillable if len(hanleFillable) else fields))
+        attrs['__auto__'] = attrs.get('auto')
         attrs['__fillable__'] = hanleFillable
         attrs['__mappings__'] = mappings
         attrs['__table__'] = tableName
         attrs['__primary_key__'] = primaryKey #主属性名
         attrs['__fields__'] = fields #除主键外的属性名
-        attrs['__select__'] = 'select `%s`, %s from `%s`' % (primaryKey, ', '.join(escaped_fields), tableName)
+        attrs['__select__'] = 'select `%s`, %s  from `%s`' % (primaryKey, ', '.join(escaped_fields), tableName)
         attrs['__insert__'] = 'insert into `%s` (%s, `%s`) values (%s)' % (tableName, ', '.join(escaped_fields), primaryKey, create_args_string(len(escaped_fields) + 1))
         attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
         #print(','.join(map(lambda f:f.replace(f,f+'=?'),fields)))
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
+        # print (attrs)
+        # sys.exit(0)
         return type.__new__(cls, name, bases, attrs)
 
 class Model(dict, metaclass = ModelMetaclass):
     def __init__(self, **kw):
+        print (1)
         super(Model, self).__init__(**kw)
 
     def __getattr__(self, key):
@@ -153,6 +157,32 @@ class Model(dict, metaclass = ModelMetaclass):
                 setattr(self, key, value)
         return value
 
+    def autoComplete(cls):
+        auto = cls.__auto__
+        auto_data = {}
+        if len(auto) == 0:
+            return auto_data
+        for item in auto:
+            if len(item) == 2:
+                auto_data[item[0]] = item[1]
+            elif len(item) == 3:
+                me_def = ''.join(item[-1:])
+                if me_def == 'callback':
+                    func = item[1]
+                    auto_data[item[0]] = getattr(cls,func,'default')()
+                elif me_def == 'def':
+                    try:
+                        handle_def = item[1]
+                        module = handle_def.split('.')[0]
+                        use_def = handle_def.split('.')[1]
+                        me_import = importlib.import_module(module)
+                    except ImportError:  # 如果导入失败，即配置文件不存在，系统推出
+                        logging.info("导入"+module+"失败")
+                        destory_pool()
+                        sys.exit()
+                    auto_data[item[0]] = getattr(me_import,use_def)()
+        return auto_data
+
     @asyncio.coroutine
     def find(cls, pk):
         #sys.exit(0)
@@ -163,10 +193,11 @@ class Model(dict, metaclass = ModelMetaclass):
         return rs[0]
 
     @asyncio.coroutine
-    def save(self):
-        args = list(map(self.getValueOrDefault, self.__fillable__ if self.__fillable__ is not None else self.__fields__))
-        args.append(self.getValueOrDefault(self.__primary_key__))
-        rows = yield from execute(self.__insert__, args)
+    def save(cls):
+        cls.autoComplete()
+        args = list(map(cls.getValueOrDefault, cls.__fillable__ if len(cls.__fillable__)  else cls.__fields__))
+        args.append(cls.getValueOrDefault(cls.__primary_key__))
+        rows = yield from execute(cls.__insert__, args)
         print(rows)
         if rows != 1:
             logging.warn('failed to insert record:affected rows:%s'%rows)
@@ -210,13 +241,16 @@ class Member(Model):
     id = IntegerField(primary_key = True)
     open_id = StringField()
     test = StringField()
-    fillable = ['open_id','ss']
-
+    password = StringField()
+   #fillable = ['open_id','password','test']
+    auto = [['password','encrypt','callback'],['created_at','time.time','def'],['status',0]]
+    def encrypt(self):
+        return 'encrypt'
 def test():
     yield from create_pool(loop, user='root', password='gth123456.', db='weixin', host='127.0.0.1')
-    user = Member(id=None,open_id='dssdsd')
+    user = Member(password ='123456',open_id='3333',test='ssdd')
     rs = yield from user.save()
-    print (rs)
+    #print (rs)
     yield from destory_pool()
 loop = asyncio.get_event_loop()
 loop.run_until_complete(test())
