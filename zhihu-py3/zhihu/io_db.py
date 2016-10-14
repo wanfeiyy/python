@@ -3,6 +3,8 @@ import asyncio
 import sys
 import logging
 import importlib
+import crypt
+import time
 @asyncio.coroutine
 def create_pool(loop, **kw):
     #logging.info('create database connection pool...')
@@ -82,7 +84,12 @@ class IntegerField(Field):
     def __init__(self, name=None, column_type = 'bigint', primary_key = False, default = None):
         super(IntegerField, self).__init__(name, column_type, primary_key, default)
 
+class FloatField(Field):
+    def __init__(self, name=None, primary_key=False, default=0.0):
+        super().__init__(name, 'real', primary_key, default)
+
 class ModelMetaclass(type):
+
     def __new__(cls, name, bases, attrs,**kw):
         if name == 'Model':
             return type.__new__(cls, name, bases, attrs)
@@ -116,6 +123,7 @@ class ModelMetaclass(type):
                      hanleFillable.append(x)
         escaped_fields = list(map(lambda f:'%s' %f, hanleFillable if len(hanleFillable) else fields))
         attrs['__auto__'] = attrs.get('auto')
+        attrs['__auto__'].append('created_at'),attrs['__auto__'].append('updated_at') if attrs.get('timestamps') else attrs['__auto__']
         attrs['__fillable__'] = hanleFillable
         attrs['__mappings__'] = mappings
         attrs['__table__'] = tableName
@@ -126,13 +134,12 @@ class ModelMetaclass(type):
         attrs['__update__'] = 'update `%s` set %s where `%s`=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mappings.get(f).name or f), fields)), primaryKey)
         #print(','.join(map(lambda f:f.replace(f,f+'=?'),fields)))
         attrs['__delete__'] = 'delete from `%s` where `%s`=?' % (tableName, primaryKey)
-        # print (attrs)
+        #print (attrs)
         # sys.exit(0)
         return type.__new__(cls, name, bases, attrs)
 
 class Model(dict, metaclass = ModelMetaclass):
     def __init__(self, **kw):
-        print (1)
         super(Model, self).__init__(**kw)
 
     def __getattr__(self, key):
@@ -153,23 +160,27 @@ class Model(dict, metaclass = ModelMetaclass):
             field = self.__mappings__[key]
             if field.default is not None:
                 value = field.default() if callable(field.default) else field.default
-                #logging.debug('using default value for %s:%s'%(key, str(value)))
+                logging.debug('using default value for %s:%s'%(key, str(value)))
                 setattr(self, key, value)
         return value
 
-    def autoComplete(cls):
+    def autoComplete(cls,key):
         auto = cls.__auto__
-        auto_data = {}
-        if len(auto) == 0:
-            return auto_data
+        if key == 'created_at' or key == 'updated_at':
+            return time.time()
+        value = cls.getValueOrDefault(key)
+        if len(auto)  == 0:
+            return value
         for item in auto:
-            if len(item) == 2:
-                auto_data[item[0]] = item[1]
-            elif len(item) == 3:
+            if len(item) == 1:
+                pass
+            elif len(item) == 2 and key in item:
+                value = item[1]
+            elif len(item) == 3 and key in item:
                 me_def = ''.join(item[-1:])
                 if me_def == 'callback':
                     func = item[1]
-                    auto_data[item[0]] = getattr(cls,func,'default')()
+                    value = getattr(cls,func,'default')(value)
                 elif me_def == 'def':
                     try:
                         handle_def = item[1]
@@ -180,8 +191,10 @@ class Model(dict, metaclass = ModelMetaclass):
                         logging.info("导入"+module+"失败")
                         destory_pool()
                         sys.exit()
-                    auto_data[item[0]] = getattr(me_import,use_def)()
-        return auto_data
+                    value = getattr(me_import,use_def)(value)
+
+
+        return value
 
     @asyncio.coroutine
     def find(cls, pk):
@@ -194,8 +207,7 @@ class Model(dict, metaclass = ModelMetaclass):
 
     @asyncio.coroutine
     def save(cls):
-        cls.autoComplete()
-        args = list(map(cls.getValueOrDefault, cls.__fillable__ if len(cls.__fillable__)  else cls.__fields__))
+        args = list(map(cls.autoComplete, cls.__fillable__ if len(cls.__fillable__)  else cls.__fields__))
         args.append(cls.getValueOrDefault(cls.__primary_key__))
         rows = yield from execute(cls.__insert__, args)
         print(rows)
@@ -240,15 +252,18 @@ class Member(Model):
     __table__ = 'members'
     id = IntegerField(primary_key = True)
     open_id = StringField()
-    test = StringField()
+    created_at = FloatField()
+    updated_at = FloatField()
     password = StringField()
+    json = StringField()
+    timestamps = False
    #fillable = ['open_id','password','test']
-    auto = [['password','encrypt','callback'],['created_at','time.time','def'],['status',0]]
-    def encrypt(self):
-        return 'encrypt'
+    auto = [['password','encrypt','callback'],['json','json.dumps','def']]
+    def encrypt(self,pwd):
+        return crypt.crypt(pwd,'wy')
 def test():
     yield from create_pool(loop, user='root', password='gth123456.', db='weixin', host='127.0.0.1')
-    user = Member(password ='123456',open_id='3333',test='ssdd')
+    user = Member(password ='123456',open_id='3333',json=['list','tuple','dict','set'])
     rs = yield from user.save()
     #print (rs)
     yield from destory_pool()
