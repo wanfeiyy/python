@@ -122,8 +122,10 @@ class ModelMetaclass(type):
                  if x in fields:
                      hanleFillable.append(x)
         escaped_fields = list(map(lambda f:'%s' %f, hanleFillable if len(hanleFillable) else fields))
+        attrs['__escaped_fields__'] = escaped_fields
         attrs['__auto__'] = attrs.get('auto')
-        attrs['__auto__'].append('created_at'),attrs['__auto__'].append('updated_at') if attrs.get('timestamps') else attrs['__auto__']
+        attrs['__auto__'].append(['created_at']) if attrs.get('timestamps') else attrs['__auto__']
+        attrs['__auto__'].append(['updated_at']) if attrs.get('timestamps') else attrs['__auto__']
         attrs['__fillable__'] = hanleFillable
         attrs['__mappings__'] = mappings
         attrs['__table__'] = tableName
@@ -166,14 +168,13 @@ class Model(dict, metaclass = ModelMetaclass):
 
     def autoComplete(cls,key):
         auto = cls.__auto__
-        if key == 'created_at' or key == 'updated_at':
-            return time.time()
         value = cls.getValueOrDefault(key)
-        if len(auto)  == 0:
+        if len(auto)  == 0 :
             return value
         for item in auto:
-            if len(item) == 1:
-                pass
+            print (item)
+            if len(item) == 1 and (key == 'created_at' or key == 'updated_at'):
+                return time.time()
             elif len(item) == 2 and key in item:
                 value = item[1]
             elif len(item) == 3 and key in item:
@@ -192,8 +193,6 @@ class Model(dict, metaclass = ModelMetaclass):
                         destory_pool()
                         sys.exit()
                     value = getattr(me_import,use_def)(value)
-
-
         return value
 
     @asyncio.coroutine
@@ -219,26 +218,44 @@ class Model(dict, metaclass = ModelMetaclass):
     def findAll(cls,where = None,args = None,**kw):
         # 初始化SQL语句和参数列表
         sql = [cls.__select__]
+        if (kw['column'] is not None):
+            escaped_fields = cls.__escaped_fields__
+            column = [kw['column']]
+            find_column  = [item for item in column if item in escaped_fields]
+            if len(find_column):
+                sql = ['select  %s  from `%s`' % (', '.join(find_column), cls.__table__)]
+            else:
+                logging.warning('未查询到相关column')
+                destory_pool()
         if args is None:
             args = []
             # WHERE查找条件的关键字
         if where:
-            sql.append('where ')
-            sql.append(where)
+            if isinstance(where,tuple) or isinstance(where,list):
+                sql.append('where ')
+                for item in where:
+                    if len(item) == 3:
+                        if(item == where[-1:][0]):
+                            sql.append(item[0]+' '+item[1]+' ( ? )')
+                        else:
+                             sql.append(item[0] + ' ' + item[1] + ' ( ? )' + ' and')
+
+                    args.append(item[2])
         if kw.get('orderBy') is not None:
             sql.append('order by %s' % (kw['orderBy']))
         limit = kw.get('limit')
         if limit is not None:
             if isinstance(limit,int):
-                sql.append('limit')
+                sql.append('limit ?')
                 args.append(limit)
             elif isinstance(limit,tuple) and len(limit) == 2:
                 sql.append('limit ?,?')
-                args.append(limit)
+                args = limit
             else:
                 raise ValueError('Invalid limit value: %s' % limit)
-        print (sql,args)
-        rs = yield from select(' '.join(sql), args)
+        #print (sql,args)
+        print(' '.join(sql),args)
+        rs = yield from select(' '.join(sql), tuple(args))
         return rs
         #rs = yield from select('%s where %s = ?' % (cls.__select__, cls.__primary_key__))
 @asyncio.coroutine
@@ -256,16 +273,17 @@ class Member(Model):
     updated_at = FloatField()
     password = StringField()
     json = StringField()
-    timestamps = False
+    timestamps = True
    #fillable = ['open_id','password','test']
     auto = [['password','encrypt','callback'],['json','json.dumps','def']]
     def encrypt(self,pwd):
         return crypt.crypt(pwd,'wy')
 def test():
     yield from create_pool(loop, user='root', password='gth123456.', db='weixin', host='127.0.0.1')
-    user = Member(password ='123456',open_id='3333',json=['list','tuple','dict','set'])
-    rs = yield from user.save()
-    #print (rs)
+    #user = Member(password ='123456',open_id='3333',json=['list','tuple','dict','set'],created_at=1476713397.89224)
+    user = Member()
+    rs = yield from user.findAll(where=(['id','in','60,70,80'],['open_id','=',3333],),column='open_id',limit=2)
+    print (rs)
     yield from destory_pool()
 loop = asyncio.get_event_loop()
 loop.run_until_complete(test())
