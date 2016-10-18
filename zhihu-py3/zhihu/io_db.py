@@ -220,27 +220,21 @@ class Model(dict, metaclass = ModelMetaclass):
         sql = [cls.__select__]
         if (kw['column'] is not None):
             escaped_fields = cls.__escaped_fields__
-            column = [kw['column']]
+            column = kw['column']
             find_column  = [item for item in column if item in escaped_fields]
+            find_column.append(cls.__primary_key__) if cls.__primary_key__ in column else find_column
             if len(find_column):
                 sql = ['select  %s  from `%s`' % (', '.join(find_column), cls.__table__)]
             else:
                 logging.warning('未查询到相关column')
-                destory_pool()
+                yield from destory_pool()
+                sys.exit(0)
         if args is None:
             args = []
             # WHERE查找条件的关键字
         if where:
-            if isinstance(where,tuple) or isinstance(where,list):
-                sql.append('where ')
-                for item in where:
-                    if len(item) == 3:
-                        if(item == where[-1:][0]):
-                            sql.append(item[0]+' '+item[1]+' ( ? )')
-                        else:
-                             sql.append(item[0] + ' ' + item[1] + ' ( ? )' + ' and')
-
-                    args.append(item[2])
+            sql.append('where ')
+            sql.append(where)
         if kw.get('orderBy') is not None:
             sql.append('order by %s' % (kw['orderBy']))
         limit = kw.get('limit')
@@ -264,30 +258,35 @@ def destory_pool():
     if __pool is not None:
         __pool.close()
         yield from __pool.wait_closed()
-
-class Member(Model):
-    __table__ = 'members'
-    id = IntegerField(primary_key = True)
-    open_id = StringField()
-    created_at = FloatField()
-    updated_at = FloatField()
-    password = StringField()
-    json = StringField()
-    timestamps = True
-   #fillable = ['open_id','password','test']
-    auto = [['password','encrypt','callback'],['json','json.dumps','def']]
-    def encrypt(self,pwd):
-        return crypt.crypt(pwd,'wy')
-def test():
-    yield from create_pool(loop, user='root', password='gth123456.', db='weixin', host='127.0.0.1')
-    #user = Member(password ='123456',open_id='3333',json=['list','tuple','dict','set'],created_at=1476713397.89224)
-    user = Member()
-    rs = yield from user.findAll(where=(['id','in','60,70,80'],['open_id','=',3333],),column='open_id',limit=2)
-    print (rs)
-    yield from destory_pool()
-loop = asyncio.get_event_loop()
-loop.run_until_complete(test())
-loop.close()
+#
+# class Member(Model):
+#     __table__ = 'members'
+#     id = IntegerField(primary_key = True)
+#     open_id = StringField()
+#     created_at = FloatField()
+#     updated_at = FloatField()
+#     password = StringField()
+#     json = StringField()
+#     timestamps = True
+#    #fillable = ['open_id','password','test']
+#     auto = [['password','encrypt','callback'],['json','json.dumps','def']]
+#     def encrypt(self,pwd):
+#         return crypt.crypt(pwd,'wy')
+# def test():
+#     yield from create_pool(loop, user='root', password='gth123456.', db='weixin', host='127.0.0.1')
+#     #user = Member(password ='123456',open_id='3333',json=['list','tuple','dict','set'],created_at=1476713397.89224)
+#     user = Member()
+#     one = yield from user.find(2)
+#     rs = yield from user.findAll(where='id in (60,70,80) and open_id = 333',column=['open_id','name','json'],limit=(1,2,))
+#     if one is None:
+#         print (1)
+#     else:
+#         print (2)
+#     print (one,rs)
+#     yield from destory_pool()
+# loop = asyncio.get_event_loop()
+# loop.run_until_complete(test())
+# loop.close()
 
 
 

@@ -11,9 +11,10 @@ from .collection import Collection
 from .column import Column
 from .post import Post
 from .topic import Topic
+from .io_db import *
 
 __all__ = ['ZhihuClient', 'Question', 'Author', 'ActType', 'Activity',
            'Answer', 'Collection', 'CollectActType', 'Column', 'Post', 'Topic',
-           'ANONYMOUS', 'BanException']
+           'ANONYMOUS', 'BanException',]
 
 __version__ = '0.3.23'
